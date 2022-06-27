@@ -1,9 +1,9 @@
 import unittest
 import weakref
+from typing import Dict
 from typing import List
+from typing import Tuple
 
-import numpy as np
-import numpy.testing as npt
 import slicer
 import vtk
 from slicer.ScriptedLoadableModule import ScriptedLoadableModule
@@ -19,10 +19,8 @@ class MarkupConstraints(ScriptedLoadableModule):
 
         parent.title = "Markup Constraints"
         parent.categories = ["Developer Tools"]
-        parent.dependencies = []
-        parent.contributors = [
-            "David Allemang (Kitawre Inc.)",
-        ]
+        parent.dependencies = ["Markups"]
+        parent.contributors = ["David Allemang (Kitware Inc.)"]
         parent.helpText = """
         Markup Constraints is a collection of utilities to constrain the
         positions of markup control points based on the positions of other
@@ -41,7 +39,7 @@ class MarkupConstraintsWidget(ScriptedLoadableModuleWidget):
 
 
 class ControlPoint:
-    def __init__(self, node: "vtkMRMLMarkupsNode", id_: str):
+    def __init__(self, node: "slicer.vtkMRMLMarkupsNode", id_: str):
         self.node = node
         self.id = id_
 
@@ -50,8 +48,8 @@ class ControlPoint:
         return self.node.GetNthControlPointIndexByID(self.id)
 
     @property
-    def position(self):
-        return self.node.GetNthControlPointPositionVector(self.idx)
+    def position(self) -> Tuple[float, float, float]:
+        return self.node.GetNthControlPointPosition(self.idx)
 
     @position.setter
     def position(self, pos):
@@ -61,7 +59,7 @@ class ControlPoint:
         self.node.SetNthControlPointLocked(self.idx, locked)
 
     @classmethod
-    def new(cls, node: "vtkMRMLMarkupsNode", pos=None):
+    def new(cls, node: "slicer.vtkMRMLMarkupsNode", pos=None):
         if pos is None:
             pos = vtk.vtkVector3d()
         elif not isinstance(pos, vtk.vtkVector3d):
@@ -76,86 +74,111 @@ class MarkupConstraintsLogic(
     ScriptedLoadableModuleLogic,
     VTKObservationMixin,
 ):
-    CONSTRAINTS = {}
+    _registry = {}
+
+    _constraints: Dict[ControlPoint, Tuple[str, ...]]
+    _dependencies: weakref.WeakKeyDictionary[
+        "slicer.vtkMRMLMarkupsNode", Dict[str, List[ControlPoint]]
+    ]
+    _position_cache: weakref.WeakKeyDictionary[
+        "slicer.vtkMRMLMarkupsNode", Dict[str, Tuple[float, float, float]]
+    ]
 
     def __init__(self):
         ScriptedLoadableModuleLogic.__init__(self)
         VTKObservationMixin.__init__(self)
 
         self._constraints = {}
+        # {target: (kind, *args)}
+        # used to track which points are constrained, and how
+
         self._dependencies = weakref.WeakKeyDictionary()
-        self._cached = weakref.WeakKeyDictionary()
+        # {arg.node: {arg.id: [*targets]}}
+        # used to determine the points to update after a given point is moved
 
-    def _updateDependencies(self):
-        self._dependencies.clear()
+        self._position_cache = weakref.WeakKeyDictionary()
+        # {arg.node: {arg.id: position}}
+        # used to determine whether a point has moved or not, to prevent extra updates
 
-        for tgt, (kind, deps) in self._constraints.items():
-            for dep in deps + [tgt]:
-                if dep not in self._dependencies:
-                    self._dependencies[dep.node] = set()
-                self._dependencies[dep.node].add(tgt)
+    def _onNodeModify(self, node, event):
+        position_cache = self._position_cache.setdefault(node, {})
 
-        events = (
-            slicer.vtkMRMLMarkupsNode.PointAddedEvent,
-            slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-            slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
-        )
+        for arg_id, targets in self._dependencies[node].items():
+            current = ControlPoint(node, arg_id).position
 
-        self.removeObservers()
+            if position_cache.get(arg_id, None) == current:
+                continue
 
-        for node in self._dependencies:
-            for event in events:
-                self.addObserver(
-                    node,
-                    event,
-                    self.onNodeModify,
-                    priority=100.0,
-                )
+            position_cache[arg_id] = current
+
+            for target in targets:
+                kind, *args = self._constraints[target]
+                func = self._registry[kind]
+                func(target, *args)
+
+                # todo add target to queue, since its position has updated and constraints should propagate
 
     @classmethod
     def register(cls, kind):
         def decorator(func):
-            cls.CONSTRAINTS[kind] = func
+            cls._registry[kind] = func
             return func
 
         return decorator
 
-    def onNodeModify(self, node, event):
-        for tgt in self._dependencies[node]:
-            kind, deps = self._constraints[tgt]
+    def setConstraint(self, target: ControlPoint, kind: str, *args: ControlPoint):
+        _EVENTS = ()
 
-            unchanged = all(
-                dep in self._cached and np.allclose(dep.position, self._cached[dep])
-                for dep in deps + [tgt]
-            )
+        self._constraints[target] = (kind, *args)
 
-            for dep in deps + [tgt]:
-                self._cached[dep] = dep.position
+        for arg in args:
+            # check the arg is a control point; if so, it should be observed and
+            # added to the internal datastructures.
+            # if not it will pass through to the constraint as a constant parameter
+            if isinstance(arg, ControlPoint):
+                if arg.node not in self._dependencies:
+                    for event in (
+                        slicer.vtkMRMLMarkupsNode.PointAddedEvent,
+                        slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                        slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
+                    ):
+                        self.addObserver(
+                            arg.node,
+                            event,
+                            self._onNodeModify,
+                            priority=100.0,
+                        )
 
-            if not unchanged:
-                self.CONSTRAINTS[kind](tgt, deps)
+                node_dependencies = self._dependencies.setdefault(arg.node, {})
+                dependent_nodes = node_dependencies.setdefault(arg.id, [])
+                dependent_nodes.append(target)
 
-    def delConstraint(
-        self,
-        tgt: ControlPoint,
-    ):
-        del self._constraints[tgt]
-        self._updateDependencies()
+        func = self._registry[kind]
+        func(target, *args)
 
-    def setConstraint(
-        self,
-        tgt: ControlPoint,
-        deps: List[ControlPoint],
-        kind: str,
-    ):
-        self._constraints[tgt] = (kind, deps)
-        self._updateDependencies()
-        self.CONSTRAINTS[kind](tgt, deps)
+    def delConstraint(self, target: ControlPoint):
+        kind, *args = self._constraints.pop(target)
+
+        for arg in args:
+            self._dependencies[arg.node][arg.id].remove(target)
+
+            if not self._dependencies[arg.node][arg.id]:
+                del self._dependencies[arg.node][arg.id]
+
+            if not self._dependencies[arg.node]:
+                del self._dependencies[arg.node]
+
+                for event in (
+                    slicer.vtkMRMLMarkupsNode.PointAddedEvent,
+                    slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                    slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
+                ):
+                    self.removeObserver(arg.node, event, self._onNodeModify)
 
 
 @MarkupConstraintsLogic.register("midpoint")
-def update_tgt(tgt: ControlPoint, deps: List[ControlPoint]):
-    """Set tgt position to the mean of deps positions"""
+def update_tgt(tgt: ControlPoint, *deps: ControlPoint):
+    """Set tgt position to the mean of deps positions."""
 
     pos = vtk.vtkVector3d()
     for dep in deps:
@@ -166,33 +189,42 @@ def update_tgt(tgt: ControlPoint, deps: List[ControlPoint]):
 
 
 @MarkupConstraintsLogic.register("lock")
-def update_tgt(tgt: ControlPoint, deps: List[ControlPoint]):
+def update_tgt(tgt: ControlPoint, dep: ControlPoint):
     """Set tgt position to match dep position"""
-
-    (dep,) = deps
 
     tgt.position = dep.position
 
 
 @MarkupConstraintsLogic.register("project")
-def update_tgt(tgt: ControlPoint, deps: List[ControlPoint]):
-    """Set tgt position to lie on line defined by deps."""
+def update_tgt(tgt: ControlPoint, root: ControlPoint, axis: ControlPoint):
+    """Set tgt position to lie on the line from root to axis"""
 
-    root, axis = deps
-    root = root.position
-    axis = axis.position
-    pos = tgt.position
+    root = vtk.vtkVector3d(root.position)
+    axis = vtk.vtkVector3d(axis.position)
+    pos = vtk.vtkVector3d(tgt.position)
 
     vtk.vtkMath.Subtract(axis, root, axis)
     vtk.vtkMath.Subtract(pos, root, pos)
 
     t = vtk.vtkMath.Dot(pos, axis) / vtk.vtkMath.Dot(axis, axis)
 
-    # t = np.clip(t, 0, 1)
-
     vtk.vtkMath.MultiplyScalar(axis, t)
     vtk.vtkMath.Add(axis, root, axis)
     tgt.position = axis
+
+@MarkupConstraintsLogic.register("distance")
+def update_tgt(tgt: ControlPoint, root: ControlPoint, distance: float):
+    """Set tgt position to be a certain distance from root."""
+
+    root = vtk.vtkVector3d(root.position)
+    pos = vtk.vtkVector3d(tgt.position)
+
+    vtk.vtkMath.Subtract(pos, root, pos)
+    vtk.vtkMath.Normalize(pos)
+    vtk.vtkMath.MultiplyScalar(pos, distance)
+    vtk.vtkMath.Add(pos, root, pos)
+
+    tgt.position = pos
 
 
 class MarkupConstraintsTest(
@@ -211,207 +243,3 @@ class MarkupConstraintsTest(
         a = ControlPoint.new(node, [1, 2, 3])
         b = ControlPoint.new(node, [2, 3, 4])
         t = ControlPoint.new(node, [3, 4, 5])
-
-        np.testing.assert_almost_equal(
-            t.position,
-            [3, 4, 5],
-            err_msg="ControlPoint.position invalid",
-        )
-
-        # midpoint within node
-        logic.setConstraint(t, [a, b], "midpoint")
-        np.testing.assert_almost_equal(
-            t.position,
-            [1.5, 2.5, 3.5],
-            err_msg="initial midpoint (intra) invalid",
-        )
-        a.position = [0, 1, 2]
-        np.testing.assert_almost_equal(
-            t.position,
-            [1, 2, 3],
-            err_msg="midpoint update (intra) invalid",
-        )
-
-        # lock within node
-        logic.setConstraint(t, [a], "lock")
-        np.testing.assert_almost_equal(
-            t.position,
-            [0, 1, 2],
-            err_msg="initial lock (intra) invalid",
-        )
-        a.position = [1, 2, 3]
-        np.testing.assert_almost_equal(
-            t.position,
-            [1, 2, 3],
-            err_msg="lock update (intra) invalid",
-        )
-
-        # project within node
-        logic.setConstraint(t, [a, b], "project")
-        np.testing.assert_almost_equal(
-            t.position,
-            [0, 1, 2],
-            err_msg="initial project (intra) invalid",
-        )
-        a.position = [0, 0, 0]
-        b.position = [5, -5, 5]
-        t.position = [1, 1, 1]
-        np.testing.assert_almost_equal(
-            t.position,
-            [0.3333333, -0.3333333, 0.3333333],
-            err_msg="project update (intra) invalid",
-        )
-
-        # remove constraint
-        logic.delConstraint(t)
-        a.position = [0, 0, 0]
-        b.position = [0, 0, 0]
-        np.testing.assert_almost_equal(
-            t.position,
-            [0.3333333, -0.3333333, 0.3333333],
-            err_msg="initial delConstraint (intra) invalid",
-        )
-        t.position = [1, 1, 1]
-        np.testing.assert_almost_equal(
-            t.position,
-            [1, 1, 1],
-            err_msg="delConstraint (intra) invalid",
-        )
-
-        slicer.mrmlScene.RemoveNode(node)
-        del node, a, b, t  # todo fix memory leaks
-        # todo assert logic.constraints is empty
-
-        # constraints between nodes
-        srcNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-        tgtNode = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-
-        a = ControlPoint.new(srcNode, [1, 2, 3])
-        b = ControlPoint.new(srcNode, [2, 3, 4])
-        t = ControlPoint.new(tgtNode, [3, 4, 5])
-
-        np.testing.assert_almost_equal(
-            t.position,
-            [3, 4, 5],
-            err_msg="ControlPoint.position invalid",
-        )
-
-        # midpoint between nodes
-        logic.setConstraint(t, [a, b], "midpoint")
-        np.testing.assert_almost_equal(
-            t.position,
-            [1.5, 2.5, 3.5],
-            err_msg="initial midpoint (inter) invalid",
-        )
-        a.position = [0, 1, 2]
-        np.testing.assert_almost_equal(
-            t.position,
-            [1, 2, 3],
-            err_msg="midpoint update (inter) invalid",
-        )
-
-        # lock between nodes
-        logic.setConstraint(t, [a], "lock")
-        np.testing.assert_almost_equal(
-            t.position,
-            [0, 1, 2],
-            err_msg="initial lock (inter) invalid",
-        )
-        a.position = [1, 2, 3]
-        np.testing.assert_almost_equal(
-            t.position,
-            [1, 2, 3],
-            err_msg="lock update (inter) invalid",
-        )
-
-        # project between nodes
-        logic.setConstraint(t, [a, b], "project")
-        np.testing.assert_almost_equal(
-            t.position,
-            [0, 1, 2],
-            err_msg="initial project (inter) invalid",
-        )
-        a.position = [0, 0, 0]
-        b.position = [5, -5, 5]
-        t.position = [1, 1, 1]
-        np.testing.assert_almost_equal(
-            t.position,
-            [0.3333333, -0.3333333, 0.3333333],
-            err_msg="project update (inter) invalid",
-        )
-
-        # remove constraint
-        logic.delConstraint(t)
-        a.position = [0, 0, 0]
-        b.position = [0, 0, 0]
-        np.testing.assert_almost_equal(
-            t.position,
-            [0.3333333, -0.3333333, 0.3333333],
-            err_msg="initial delConstraint (inter) invalid",
-        )
-        t.position = [1, 1, 1]
-        np.testing.assert_almost_equal(
-            t.position,
-            [1, 1, 1],
-            err_msg="delConstraint (inter) invalid",
-        )
-
-        slicer.mrmlScene.RemoveNode(srcNode)
-        slicer.mrmlScene.RemoveNode(tgtNode)
-        del srcNode, tgtNode, a, b, t
-        # todo assert logic.constraints is empty
-
-        # todo failing tests
-        # chained dependency
-        node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-        a = ControlPoint.new(node, [0, 1, 2])
-        b = ControlPoint.new(node, [-1, -2, 3])
-        r = ControlPoint.new(node, [0, 0, 0])
-        u = ControlPoint.new(node)
-        v = ControlPoint.new(node)
-
-        logic.setConstraint(u, [a, b], "midpoint")
-        logic.setConstraint(v, [r, u], "midpoint")
-
-        np.testing.assert_almost_equal(
-            u.position,
-            [-0.5, -0.5, 2.5],
-            err_msg="initial chained midpoint u invalid",
-        )
-        np.testing.assert_almost_equal(
-            v.position,
-            [-0.25, -0.25, 1.25],
-            err_msg="initial chained midpoint v invalid",
-        )
-
-        a.position = [1, 1, 2]
-
-        np.testing.assert_almost_equal(
-            u.position,
-            [0, -0.5, 2.5],
-            err_msg="update (a) chained midpoint u",
-        )
-        np.testing.assert_almost_equal(
-            v.position,
-            [0, -0.25, 1.25],
-            err_msg="update (a) chained midpoint v",
-        )
-
-        r.position = [0, 1, 0]
-
-        np.testing.assert_almost_equal(
-            u.position,
-            [0, -0.5, 2.5],
-            err_msg="update (r) chained midpoint u",
-        )
-        np.testing.assert_almost_equal(
-            v.position,
-            [0, 0.25, 1.25],
-            err_msg="update (r) chained midpoint v",
-        )
-
-        slicer.mrmlScene.RemoveNode(node)
-        del node, a, b, r, u, v
-        # todo assert logic.constraints is empty
-
-        # todo constrain to model
