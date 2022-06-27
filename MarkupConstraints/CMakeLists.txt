@@ -1,10 +1,9 @@
 #-----------------------------------------------------------------------------
-set(MODULE_NAME DependantMarkups)
+set(MODULE_NAME MarkupConstraints)
 
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
-  MarkupConstraints.py
   )
 
 set(MODULE_PYTHON_RESOURCES

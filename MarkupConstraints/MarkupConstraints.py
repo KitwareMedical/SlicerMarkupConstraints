@@ -1,32 +1,16 @@
-import abc
-import collections
-import contextlib
-import json
 import unittest
 import weakref
-
-from copy import deepcopy
-from typing import Union, Tuple, List, Optional, Any, Dict
+from typing import List
 
 import numpy as np
 import numpy.testing as npt
-
 import slicer
 import vtk
-
 from slicer.ScriptedLoadableModule import ScriptedLoadableModule
 from slicer.ScriptedLoadableModule import ScriptedLoadableModuleWidget
 from slicer.ScriptedLoadableModule import ScriptedLoadableModuleLogic
 from slicer.ScriptedLoadableModule import ScriptedLoadableModuleTest
-
 from slicer.util import VTKObservationMixin
-from slicer.util import NodeModify
-
-try:
-    import networkx as nx
-except ModuleNotFoundError:
-    slicer.util.pip_install("networkx")
-    import networkx as nx
 
 
 class MarkupConstraints(ScriptedLoadableModule):
@@ -56,9 +40,6 @@ class MarkupConstraintsWidget(ScriptedLoadableModuleWidget):
     pass
 
 
-from DependantMarkups import VTKSuppressibleObservationMixin
-
-
 class ControlPoint:
     def __init__(self, node: "vtkMRMLMarkupsNode", id_: str):
         self.node = node
@@ -74,7 +55,7 @@ class ControlPoint:
 
     @position.setter
     def position(self, pos):
-        self.node.SetNthControlPointPositionFromArray(self.idx, pos)
+        self.node.SetNthControlPointPosition(self.idx, pos)
 
     def setLocked(self, locked):
         self.node.SetNthControlPointLocked(self.idx, locked)
@@ -93,13 +74,13 @@ class ControlPoint:
 
 class MarkupConstraintsLogic(
     ScriptedLoadableModuleLogic,
-    VTKSuppressibleObservationMixin,
+    VTKObservationMixin,
 ):
     CONSTRAINTS = {}
 
     def __init__(self):
         ScriptedLoadableModuleLogic.__init__(self)
-        VTKSuppressibleObservationMixin.__init__(self)
+        VTKObservationMixin.__init__(self)
 
         self._constraints = {}
         self._dependencies = weakref.WeakKeyDictionary()
