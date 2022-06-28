@@ -1,0 +1,2 @@
+slicer_add_python_unittest(SCRIPT MarkupConstraints_ControlPoint.py)
+slicer_add_python_unittest(SCRIPT MarkupConstraints_Constraints.py)

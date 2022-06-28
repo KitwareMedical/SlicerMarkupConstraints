@@ -240,14 +240,6 @@ class MarkupConstraintsTest(
     unittest.TestCase,
 ):
     def runTest(self):
-        slicer.mrmlScene.Clear()
-
-        logic = MarkupConstraintsLogic()
-        # todo assert logic.constraints is empty
-
-        # constraints within a node
-        node = slicer.mrmlScene.AddNewNodeByClass("vtkMRMLMarkupsFiducialNode")
-
-        a = ControlPoint.new(node, [1, 2, 3])
-        b = ControlPoint.new(node, [2, 3, 4])
-        t = ControlPoint.new(node, [3, 4, 5])
+        # Constraint and ControlPoint tests are in ./Testing/
+        # API tests should go here
+        raise NotImplementedError
