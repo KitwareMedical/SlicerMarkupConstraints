@@ -118,7 +118,8 @@ class MarkupConstraintsLogic(
                 func = self._registry[kind]
                 func(target, *args)
 
-                # todo add target to queue, since its position has updated and constraints should propagate
+                # todo add target to queue (unless arg is target), since its position
+                #  has updated and constraints should propagate
 
     @classmethod
     def register(cls, kind):
@@ -138,26 +139,27 @@ class MarkupConstraintsLogic(
 
         self._constraints[target] = (kind, *args)
 
-        for arg in args:
-            # check the arg is a control point; if so, it should be observed and
-            # added to the internal datastructures.
-            # if not it will pass through to the constraint as a constant parameter
-            if isinstance(arg, ControlPoint):
-                if arg.node not in self._dependencies:
+        for value in (target, *args):
+            # check the value is a control point; if so, it should be observed and added
+            # to the internal datastructures. if not it will pass through to the
+            # constraint as a constant. to change the constant, invoke setConstraint
+            # with a different value
+            if isinstance(value, ControlPoint):
+                if value.node not in self._dependencies:
                     for event in (
                         slicer.vtkMRMLMarkupsNode.PointAddedEvent,
                         slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                         slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
                     ):
                         self.addObserver(
-                            arg.node,
+                            value.node,
                             event,
                             self._onNodeModify,
                             priority=100.0,
                         )
 
-                node_dependencies = self._dependencies.setdefault(arg.node, {})
-                dependent_nodes = node_dependencies.setdefault(arg.id, [])
+                node_dependencies = self._dependencies.setdefault(value.node, {})
+                dependent_nodes = node_dependencies.setdefault(value.id, [])
                 dependent_nodes.append(target)
 
         func = self._registry[kind]
@@ -166,21 +168,21 @@ class MarkupConstraintsLogic(
     def delConstraint(self, target: ControlPoint):
         kind, *args = self._constraints.pop(target)
 
-        for arg in args:
-            self._dependencies[arg.node][arg.id].remove(target)
+        for value in (target, *args):
+            self._dependencies[value.node][value.id].remove(target)
 
-            if not self._dependencies[arg.node][arg.id]:
-                del self._dependencies[arg.node][arg.id]
+            if not self._dependencies[value.node][value.id]:
+                del self._dependencies[value.node][value.id]
 
-            if not self._dependencies[arg.node]:
-                del self._dependencies[arg.node]
+            if not self._dependencies[value.node]:
+                del self._dependencies[value.node]
 
                 for event in (
                     slicer.vtkMRMLMarkupsNode.PointAddedEvent,
                     slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
                     slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
                 ):
-                    self.removeObserver(arg.node, event, self._onNodeModify)
+                    self.removeObserver(value.node, event, self._onNodeModify)
 
 
 @MarkupConstraintsLogic.register("midpoint")
