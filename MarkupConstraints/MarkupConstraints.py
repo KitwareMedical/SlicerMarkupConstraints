@@ -1,8 +1,10 @@
 import unittest
 import weakref
+from typing import Any
 from typing import Dict
 from typing import List
 from typing import Tuple
+from typing import Union
 
 import slicer
 import vtk
@@ -126,7 +128,12 @@ class MarkupConstraintsLogic(
 
         return decorator
 
-    def setConstraint(self, target: ControlPoint, kind: str, *args: ControlPoint):
+    def setConstraint(
+        self,
+        target: ControlPoint,
+        kind: str,
+        *args: Union[ControlPoint, Any],
+    ):
         _EVENTS = ()
 
         self._constraints[target] = (kind, *args)
@@ -211,6 +218,7 @@ def update_tgt(tgt: ControlPoint, root: ControlPoint, axis: ControlPoint):
     vtk.vtkMath.MultiplyScalar(axis, t)
     vtk.vtkMath.Add(axis, root, axis)
     tgt.position = axis
+
 
 @MarkupConstraintsLogic.register("distance")
 def update_tgt(tgt: ControlPoint, root: ControlPoint, distance: float):
