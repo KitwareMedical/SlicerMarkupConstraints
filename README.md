@@ -9,9 +9,12 @@ This extension was created during [Slicer Project Week 37][pw37] for the
 See the [Architecture Overview][arch] for details on the functionality and implementation 
 of this module.
 
+See the [API Documentation][api] for details on how to consume and extend this module. 
+
 [q3dc]: https://github.com/DCBIA-OrthoLab/Q3DCExtension
 [pw37]: https://projectweek.na-mic.org/PW37_2022_Virtual/Projects/MarkupConstraints/
 [arch]: ./Docs/Architecture.md
+[api]: ./Docs/API.md
 
 ## Screenshots and Animations
 
