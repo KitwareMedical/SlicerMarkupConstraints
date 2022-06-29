@@ -1,3 +1,6 @@
+import abc
+import collections
+import typing
 import unittest
 import weakref
 from typing import Any
@@ -5,7 +8,9 @@ from typing import Dict
 from typing import List
 from typing import Tuple
 from typing import Union
+from typing import Callable
 
+import numpy as np
 import slicer
 import vtk
 from slicer.ScriptedLoadableModule import ScriptedLoadableModule
@@ -72,6 +77,15 @@ class ControlPoint:
         return cls(node, id_)
 
 
+class Constraint(typing.NamedTuple):
+    func: Callable[[ControlPoint, ...], None]
+    interactive: bool
+    locked: bool
+
+    def __call__(self, target, *args):
+        self.func(target, *args)
+
+
 class MarkupConstraintsLogic(
     ScriptedLoadableModuleLogic,
     VTKObservationMixin,
@@ -105,29 +119,19 @@ class MarkupConstraintsLogic(
     def _onNodeModify(self, node, event):
         position_cache = self._position_cache.setdefault(node, {})
 
-        for arg_id, targets in self._dependencies[node].items():
-            current = ControlPoint(node, arg_id).position
+        with slicer.util.NodeModify(node):
+            for arg_id, targets in self._dependencies[node].items():
+                current = ControlPoint(node, arg_id).position
+                cached = position_cache.get(arg_id, None)
+                if cached and np.allclose(cached, current):
+                    continue
 
-            if position_cache.get(arg_id, None) == current:
-                continue
+                position_cache[arg_id] = current
 
-            position_cache[arg_id] = current
-
-            for target in targets:
-                kind, *args = self._constraints[target]
-                func = self._registry[kind]
-                func(target, *args)
-
-                # todo add target to queue (unless arg is target), since its position
-                #  has updated and constraints should propagate
-
-    @classmethod
-    def register(cls, kind):
-        def decorator(func):
-            cls._registry[kind] = func
-            return func
-
-        return decorator
+                for target in targets:
+                    kind, *args = self._constraints[target]
+                    func = self._registry[kind]
+                    func(target, *args)
 
     def setConstraint(
         self,
@@ -136,10 +140,15 @@ class MarkupConstraintsLogic(
         *args: Union[ControlPoint, Any],
     ):
         _EVENTS = ()
+        cons: Constraint = self._registry[kind]
 
         self._constraints[target] = (kind, *args)
 
-        for value in (target, *args):
+        if cons.locked:
+            target.setLocked(True)
+
+        values = (target, *args) if cons.interactive else args
+        for value in values:
             # check the value is a control point; if so, it should be observed and added
             # to the internal datastructures. if not it will pass through to the
             # constraint as a constant. to change the constant, invoke setConstraint
@@ -162,13 +171,17 @@ class MarkupConstraintsLogic(
                 dependent_nodes = node_dependencies.setdefault(value.id, [])
                 dependent_nodes.append(target)
 
-        func = self._registry[kind]
-        func(target, *args)
+        cons(target, *args)
 
     def delConstraint(self, target: ControlPoint):
         kind, *args = self._constraints.pop(target)
+        cons: Constraint = self._registry[kind]
 
-        for value in (target, *args):
+        if cons.locked:
+            target.setLocked(False)
+
+        values = (target, *args) if cons.interactive else args
+        for value in values:
             self._dependencies[value.node][value.id].remove(target)
 
             if not self._dependencies[value.node][value.id]:
@@ -184,33 +197,58 @@ class MarkupConstraintsLogic(
                 ):
                     self.removeObserver(value.node, event, self._onNodeModify)
 
+    @classmethod
+    def registerConstraint(cls, key, func, interactive, locked):
+        cls._registry[key] = Constraint(func, interactive, locked)
 
-@MarkupConstraintsLogic.register("midpoint")
-def update_tgt(tgt: ControlPoint, *deps: ControlPoint):
-    """Set tgt position to the mean of deps positions."""
+
+def constraint(obj=..., *, key=None, interactive=True, locked=False):
+    if obj is ...:
+
+        def decorator(obj):
+            return constraint(
+                obj,
+                key=key,
+                interactive=interactive,
+                locked=locked,
+            )
+
+        return decorator
+
+    if key is None:
+        key = obj.__name__
+
+    MarkupConstraintsLogic.registerConstraint(key, obj, interactive, locked)
+
+    return obj
+
+
+@constraint(interactive=False, locked=True)
+def midpoint(target: ControlPoint, *deps: ControlPoint):
+    """Set target position to the mean of deps positions."""
 
     pos = vtk.vtkVector3d()
     for dep in deps:
         vtk.vtkMath.Add(pos, dep.position, pos)
     vtk.vtkMath.MultiplyScalar(pos, 1 / len(deps))
 
-    tgt.position = pos
+    target.position = pos
 
 
-@MarkupConstraintsLogic.register("lock")
-def update_tgt(tgt: ControlPoint, dep: ControlPoint):
-    """Set tgt position to match dep position"""
+@constraint
+def lock(target: ControlPoint, dep: ControlPoint):
+    """Set target position to match dep position"""
 
-    tgt.position = dep.position
+    target.position = dep.position
 
 
-@MarkupConstraintsLogic.register("project")
-def update_tgt(tgt: ControlPoint, root: ControlPoint, axis: ControlPoint):
-    """Set tgt position to lie on the line from root to axis"""
+@constraint
+def project(target: ControlPoint, root: ControlPoint, axis: ControlPoint):
+    """Set target position to lie on the line from root to axis"""
 
     root = vtk.vtkVector3d(root.position)
     axis = vtk.vtkVector3d(axis.position)
-    pos = vtk.vtkVector3d(tgt.position)
+    pos = vtk.vtkVector3d(target.position)
 
     vtk.vtkMath.Subtract(axis, root, axis)
     vtk.vtkMath.Subtract(pos, root, pos)
@@ -219,22 +257,22 @@ def update_tgt(tgt: ControlPoint, root: ControlPoint, axis: ControlPoint):
 
     vtk.vtkMath.MultiplyScalar(axis, t)
     vtk.vtkMath.Add(axis, root, axis)
-    tgt.position = axis
+    target.position = axis
 
 
-@MarkupConstraintsLogic.register("distance")
-def update_tgt(tgt: ControlPoint, root: ControlPoint, distance: float):
-    """Set tgt position to be a certain distance from root."""
+@constraint
+def distance(target: ControlPoint, root: ControlPoint, distance: float):
+    """Set target position to be a certain distance from root."""
 
     root = vtk.vtkVector3d(root.position)
-    pos = vtk.vtkVector3d(tgt.position)
+    pos = vtk.vtkVector3d(target.position)
 
     vtk.vtkMath.Subtract(pos, root, pos)
     vtk.vtkMath.Normalize(pos)
     vtk.vtkMath.MultiplyScalar(pos, distance)
     vtk.vtkMath.Add(pos, root, pos)
 
-    tgt.position = pos
+    target.position = pos
 
 
 class MarkupConstraintsTest(
