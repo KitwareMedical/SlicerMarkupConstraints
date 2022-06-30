@@ -1,14 +1,35 @@
+import slicer
 from MarkupConstraints import MarkupConstraintsLogic, ControlPoint
 
-l = MarkupConstraintsLogic()
+log = MarkupConstraintsLogic()
 
-n = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode')
+node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
+node.GetDisplayNode().SetPropertiesLabelVisibility(False)
+x = ControlPoint.new(node, (0, 0, 1))
+y = ControlPoint.new(node)
+log.setConstraint(y, 'idistance', x, 1)
+C = y
 
-a = ControlPoint.new(n)
-b = ControlPoint.new(n)
-c = ControlPoint.new(n)
-d = ControlPoint.new(n)
+for _ in range(5):
+    node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
+    node.GetDisplayNode().SetPropertiesLabelVisibility(False)
+    x = ControlPoint.new(node)
+    y = ControlPoint.new(node)
+    log.setConstraint(x, 'lock', C)
+    log.setConstraint(y, 'idistance', x, 1)
+    C = y
 
-l.setConstraint(c, 'distance', a, 5)  # c is 5 units from a
-
-l.setConstraint(d, 'midpoint', b, c)  # d is the midpoint of b and c
+# line = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
+# proj = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
+# pnts = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode')
+#
+# a = ControlPoint.new(proj, (0, 0, +1))
+# p = ControlPoint.new(proj)
+#
+# b = ControlPoint.new(line, (+1, 0, 0))
+# c = ControlPoint.new(line, (-1, 0, 0))
+#
+# m = ControlPoint.new(pnts)
+#
+# log.setConstraint(p, 'project', a, b, c)
+# log.setConstraint(m, 'idistance', p, 10)

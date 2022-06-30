@@ -202,7 +202,7 @@ class MarkupConstraintsLogic(
         cls._registry[key] = Constraint(func, interactive, locked)
 
 
-def constraint(obj=..., *, key=None, interactive=True, locked=False):
+def constraint(obj=..., *, key=None, interactive=False, locked=False):
     if obj is ...:
 
         def decorator(obj):
@@ -223,8 +223,8 @@ def constraint(obj=..., *, key=None, interactive=True, locked=False):
     return obj
 
 
-@constraint(interactive=False, locked=True)
-def midpoint(target: ControlPoint, *deps: ControlPoint):
+@constraint(locked=True)
+def imidpoint(target: ControlPoint, *deps: ControlPoint):
     """Set target position to the mean of deps positions."""
 
     pos = vtk.vtkVector3d()
@@ -235,20 +235,26 @@ def midpoint(target: ControlPoint, *deps: ControlPoint):
     target.position = pos
 
 
-@constraint
+@constraint(interactive=True)
 def lock(target: ControlPoint, dep: ControlPoint):
     """Set target position to match dep position"""
 
     target.position = dep.position
 
 
-@constraint
-def project(target: ControlPoint, root: ControlPoint, axis: ControlPoint):
-    """Set target position to lie on the line from root to axis"""
-
+@constraint(locked=True)
+def project(
+    target: ControlPoint,
+    source: ControlPoint,
+    root: ControlPoint,
+    axis: ControlPoint,
+):
+    """Set target position to the position on the line from root to axis that is nearest
+    to source position.
+    """
     root = vtk.vtkVector3d(root.position)
     axis = vtk.vtkVector3d(axis.position)
-    pos = vtk.vtkVector3d(target.position)
+    pos = vtk.vtkVector3d(source.position)
 
     vtk.vtkMath.Subtract(axis, root, axis)
     vtk.vtkMath.Subtract(pos, root, pos)
@@ -260,19 +266,46 @@ def project(target: ControlPoint, root: ControlPoint, axis: ControlPoint):
     target.position = axis
 
 
-@constraint
-def distance(target: ControlPoint, root: ControlPoint, distance: float):
-    """Set target position to be a certain distance from root."""
+@constraint(interactive=True)
+def iproject(target: ControlPoint, root: ControlPoint, axis: ControlPoint):
+    """Interactive variant of 'project' constraint. Move the target position to the line
+    from root to axis.
+    """
+    project(target, target, root, axis)
+
+
+@constraint(locked=True)
+def distance(
+    target: ControlPoint,
+    source: ControlPoint,
+    root: ControlPoint,
+    length: float,
+):
+    """Set target position to be source, shifted so it is a certain distance from
+    root.
+    """
 
     root = vtk.vtkVector3d(root.position)
-    pos = vtk.vtkVector3d(target.position)
+    pos = vtk.vtkVector3d(source.position)
 
     vtk.vtkMath.Subtract(pos, root, pos)
     vtk.vtkMath.Normalize(pos)
-    vtk.vtkMath.MultiplyScalar(pos, distance)
+    vtk.vtkMath.MultiplyScalar(pos, length)
     vtk.vtkMath.Add(pos, root, pos)
 
     target.position = pos
+
+
+@constraint(interactive=True)
+def idistance(
+    target: ControlPoint,
+    root: ControlPoint,
+    length: float,
+):
+    """Interactive variant of 'distance'. Move the target position to be a certain
+    distance from root.
+    """
+    distance(target, target, root, length)
 
 
 class MarkupConstraintsTest(
