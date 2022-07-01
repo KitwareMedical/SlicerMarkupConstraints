@@ -1,5 +1,3 @@
-import abc
-import collections
 import typing
 import unittest
 import weakref
@@ -77,13 +75,8 @@ class ControlPoint:
         return cls(node, id_)
 
 
-class Constraint(typing.NamedTuple):
-    func: Callable[[ControlPoint, ...], None]
-    interactive: bool
-    locked: bool
-
-    def __call__(self, target, *args):
-        self.func(target, *args)
+# Todo expand API via abstract class.
+Constraint: Callable[[ControlPoint, ...], None]
 
 
 class MarkupConstraintsLogic(
@@ -117,6 +110,8 @@ class MarkupConstraintsLogic(
         # used to determine whether a point has moved or not, to prevent extra updates
 
     def _onNodeModify(self, node, event):
+        # todo adaptor should subscribe event and handle caching via weakref if needed
+
         position_cache = self._position_cache.setdefault(node, {})
 
         with slicer.util.NodeModify(node):
@@ -144,16 +139,14 @@ class MarkupConstraintsLogic(
 
         self._constraints[target] = (kind, *args)
 
-        if cons.locked:
-            target.setLocked(True)
-
-        values = (target, *args) if cons.interactive else args
-        for value in values:
+        for value in args:
             # check the value is a control point; if so, it should be observed and added
             # to the internal datastructures. if not it will pass through to the
             # constraint as a constant. to change the constant, invoke setConstraint
             # with a different value
             if isinstance(value, ControlPoint):
+                # todo adaptor. observe events and serialize to node
+
                 if value.node not in self._dependencies:
                     for event in (
                         slicer.vtkMRMLMarkupsNode.PointAddedEvent,
@@ -177,80 +170,72 @@ class MarkupConstraintsLogic(
         kind, *args = self._constraints.pop(target)
         cons: Constraint = self._registry[kind]
 
-        if cons.locked:
-            target.setLocked(False)
+        for value in args:
+            if isinstance(value, ControlPoint):
+                # todo adaptor. remove observers and remove parameters from nodes
 
-        values = (target, *args) if cons.interactive else args
-        for value in values:
-            self._dependencies[value.node][value.id].remove(target)
+                self._dependencies[value.node][value.id].remove(target)
 
-            if not self._dependencies[value.node][value.id]:
-                del self._dependencies[value.node][value.id]
+                if not self._dependencies[value.node][value.id]:
+                    del self._dependencies[value.node][value.id]
 
-            if not self._dependencies[value.node]:
-                del self._dependencies[value.node]
+                if not self._dependencies[value.node]:
+                    del self._dependencies[value.node]
 
-                for event in (
-                    slicer.vtkMRMLMarkupsNode.PointAddedEvent,
-                    slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-                    slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
-                ):
-                    self.removeObserver(value.node, event, self._onNodeModify)
+                    for event in (
+                        slicer.vtkMRMLMarkupsNode.PointAddedEvent,
+                        slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+                        slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
+                    ):
+                        self.removeObserver(value.node, event, self._onNodeModify)
 
     @classmethod
-    def registerConstraint(cls, key, func, interactive, locked):
-        cls._registry[key] = Constraint(func, interactive, locked)
+    def registerConstraint(cls, key, func):
+        cls._registry[key] = func
 
 
-def constraint(obj=..., *, key=None, interactive=False, locked=False):
+def constraint(obj=..., *, key=None):
     if obj is ...:
-
-        def decorator(obj):
-            return constraint(
-                obj,
-                key=key,
-                interactive=interactive,
-                locked=locked,
-            )
-
-        return decorator
+        return lambda f: constraint(f, key=key)
 
     if key is None:
         key = obj.__name__
 
-    MarkupConstraintsLogic.registerConstraint(key, obj, interactive, locked)
+    MarkupConstraintsLogic.registerConstraint(key, obj)
 
     return obj
 
 
-@constraint(locked=True)
-def imidpoint(target: ControlPoint, *deps: ControlPoint):
-    """Set target position to the mean of deps positions."""
+@constraint
+def midpoint(target: ControlPoint, *sources: ControlPoint):
+    """Move target position to the mean of source positions."""
 
     pos = vtk.vtkVector3d()
-    for dep in deps:
+    for dep in sources:
         vtk.vtkMath.Add(pos, dep.position, pos)
-    vtk.vtkMath.MultiplyScalar(pos, 1 / len(deps))
+    vtk.vtkMath.MultiplyScalar(pos, 1 / len(sources))
 
     target.position = pos
 
 
-@constraint(interactive=True)
-def lock(target: ControlPoint, dep: ControlPoint):
-    """Set target position to match dep position"""
+@constraint
+def lock(target: ControlPoint, source: ControlPoint, dest: ControlPoint):
+    """Move target to the destination position. Source is ignored but required for
+    interactive locking.
+    """
 
-    target.position = dep.position
+    target.position = dest.position
 
 
-@constraint(locked=True)
+@constraint
 def project(
     target: ControlPoint,
     source: ControlPoint,
     root: ControlPoint,
     axis: ControlPoint,
 ):
-    """Set target position to the position on the line from root to axis that is nearest
-    to source position.
+    """Move target to the point on the line from root to axis nearest to source
+    position.
     """
     root = vtk.vtkVector3d(root.position)
     axis = vtk.vtkVector3d(axis.position)
@@ -266,23 +251,15 @@ def project(
     target.position = axis
 
 
-@constraint(interactive=True)
-def iproject(target: ControlPoint, root: ControlPoint, axis: ControlPoint):
-    """Interactive variant of 'project' constraint. Move the target position to the line
-    from root to axis.
-    """
-    project(target, target, root, axis)
-
-
-@constraint(locked=True)
+@constraint
 def distance(
     target: ControlPoint,
     source: ControlPoint,
     root: ControlPoint,
     length: float,
 ):
-    """Set target position to be source, shifted so it is a certain distance from
-    root.
+    """Move target to the point on the sphere centered at root with radius distance
+    nearest to source position.
     """
 
     root = vtk.vtkVector3d(root.position)
@@ -294,18 +271,6 @@ def distance(
     vtk.vtkMath.Add(pos, root, pos)
 
     target.position = pos
-
-
-@constraint(interactive=True)
-def idistance(
-    target: ControlPoint,
-    root: ControlPoint,
-    length: float,
-):
-    """Interactive variant of 'distance'. Move the target position to be a certain
-    distance from root.
-    """
-    distance(target, target, root, length)
 
 
 class MarkupConstraintsTest(

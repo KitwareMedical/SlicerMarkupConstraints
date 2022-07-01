@@ -14,7 +14,20 @@ A = ControlPoint.new(node, [-1, 0, 0])
 B = ControlPoint.new(node, [+1, 0, 0])
 C = ControlPoint.new(node)
 
-logic.setConstraint(C, 'midpoint', A, B)
+logic.setConstraint(C, 'midpoint', A, B)  # lock C to the midpoint of A and B.
+
+axis = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
+X = ControlPoint.new(axis, [-1, -1, 0])
+Y = ControlPoint.new(axis, [+1, +1, 0])
+
+proj = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
+I = ControlPoint.new(proj, [0.5, 0, 0])
+P = ControlPoint.new(node)
+
+logic.setConstraint(P, 'project', I, X, Y)  # lock P to the projection of I onto line X-Y.
+
+Q = ControlPoint.new(node)
+logic.setConstraint(Q, 'project', Q, X, Y)  # keep Q projected onto line X-Y.
 ```
 
 ## `ControlPoint`
@@ -34,21 +47,23 @@ the midpoint of B and C."
 
 ## Default Constraints
 
-### `'midpoint', *args: ControlPoint`
+### `'midpoint', *sources: ControlPoint`
 
-Set target position to the mean of deps positions.
+Move target to the mean of source positions.
 
-### `'lock', dep: ControlPoint`
+### `'lock', source: ControlPoint, dest: ControlPoint`
 
-Set target position to match dep position.
+Move target to the destination position. Source is ignored but required for interactive 
+locking.
 
-### `'project', root: ControlPoint, axis: ControlPoint`
+### `'project', source: ControlPoint, root: ControlPoint, axis: ControlPoint`
 
-Set target position to lie on the line from root to axis.
+Move target to the point on the line from root to axis nearest to source position.
 
-### `'distance', root: ControlPoint, distance: float`
+### `'distance', source: ControlPoint, root: ControlPoint, distance: float`
 
-Set target position to be a certain distance from root.
+Move target to the point on the sphere centered at root with radius distance nearest to
+source position.
 
 ## Custom Constraints
 
@@ -63,9 +78,9 @@ whenever `A` or `B` is modified.
 To register a custom constraint function, use `@MarkupConstraintsLogic.register`. For example:
 
 ```python
-from MarkupConstraints import MarkupConstraintsLogic, ControlPoint
+from MarkupConstraints import MarkupConstraintsLogic, ControlPoint, constraint
 
-@MarkupConstraintsLogic.register('my_constraint')
+@constraint
 def my_constraint(target: ControlPoint, source: ControlPoint, arg: float): 
     ...  # update target.position
 
