@@ -18,7 +18,10 @@ See the [API Documentation][api] for details on how to consume and extend this m
 
 ## Screenshots and Animations
 
-![Sample.gif](./Docs/Sample.gif)
+![Show line of projection to an axis](./Docs/project-anchor.gif)
+![Show mixture of arbitrary markup nodes](./Docs/project-angle.gif)
+![Chain of fixed distance constraints on multiple line nodes](./Docs/length-chain.gif)
+![Lock point to axis](./Docs/project-axis.gif)
 
 ## Build and Install
 
