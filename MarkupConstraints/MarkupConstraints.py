@@ -1,3 +1,4 @@
+import typing
 import unittest
 import weakref
 from typing import Any
@@ -180,7 +181,7 @@ class MarkupConstraintsLogic(
         ControlPoint: ControlPointAdaptor(),
     }
 
-    _constraints: Dict[ControlPoint, Tuple[str, ...]]
+    _constraints: Dict[ControlPoint, Tuple[str, Tuple, Tuple]]
     _dependencies: weakref.WeakKeyDictionary[ControlPoint, List[ControlPoint]]
 
     def __init__(self):
@@ -188,8 +189,8 @@ class MarkupConstraintsLogic(
         VTKObservationMixin.__init__(self)
 
         self._constraints = {}
-        # {target: (kind, *args)}
-        # used to track which points are constrained, and how
+        # {target: (kind, args, extras)}
+        # used to track how each target is constrained
 
         self._dependencies = weakref.WeakKeyDictionary()
         # {arg: [*targets]}}
@@ -206,7 +207,7 @@ class MarkupConstraintsLogic(
 
     def _onModify(self, item, event):
         for target in self._dependencies[item]:
-            kind, *args = self._constraints[target]
+            kind, args, extras = self._constraints[target]
             func = self._registry[kind]
             func(target, *args)
 
@@ -215,12 +216,16 @@ class MarkupConstraintsLogic(
         target: ControlPoint,
         kind: str,
         *args: Union[ControlPoint, Any],
-    ):  # todo extra dependencies to trigger recompute but otherwise ignored
+        extras: typing.Iterable[Union[ControlPoint, Any]] = (),
+    ):
+        args = tuple(args)
+        extras = tuple(extras)
+
+        self._constraints[target] = (kind, args, extras)
+
         cons: Constraint = self._registry[kind]
 
-        self._constraints[target] = (kind, *args)
-
-        for arg in args:
+        for arg in set(args + extras):
             deps = self._dependencies.setdefault(arg, [])
             deps.append(target)
 
