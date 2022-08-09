@@ -22,6 +22,7 @@ See the [API Documentation][api] for details on how to consume and extend this m
 ![Show mixture of arbitrary markup nodes](./Docs/project-angle.gif)
 ![Chain of fixed distance constraints on multiple line nodes](./Docs/length-chain.gif)
 ![Lock point to axis](./Docs/project-axis.gif)
+![Nearest point on a model](./Docs/model-transform.gif)
 
 ## Build and Install
 

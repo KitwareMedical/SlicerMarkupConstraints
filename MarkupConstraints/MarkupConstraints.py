@@ -1,4 +1,3 @@
-import typing
 import unittest
 import weakref
 from typing import Any
@@ -79,19 +78,110 @@ class ControlPoint:
 Constraint: Callable[[ControlPoint, ...], None]
 
 
+class NodeAdaptor:
+    """Adapts any vtkObject by handling ModifiedEvent."""
+
+    def __init__(self):
+        self._observers = {}  # {item: tag}
+
+    def wrap(self, item, method):
+        def wrapped(obj, event):
+            with slicer.util.NodeModify(obj):
+                return method(item, event)
+
+        return wrapped
+
+    def getVtkObject(self, item):
+        return item
+
+    def events(self):
+        return (vtk.vtkCommand.ModifiedEvent,)
+
+    def addObservers(self, item, method, priority=0.0):
+        events = self.events()
+
+        if item in self._observers:
+            return
+
+        wrapped = self.wrap(item, method)
+        obj = self.getVtkObject(item)
+        tags = [obj.AddObserver(event, wrapped, priority) for event in events]
+
+        self._observers[item] = obj, tags
+
+    def delObservers(self, item):
+        if item not in self._observers:
+            return
+
+        obj, tags = self._observers.pop(item)
+
+        for tag in tags:
+            obj.RemoveObserver(tag)
+
+
+class TransformableNodeAdaptor(NodeAdaptor):
+    """Adaptor for vtkMRMLTransformableNode; also observes TransformModifiedEvent."""
+
+    def events(self):
+        return super().events() + (
+            slicer.vtkMRMLTransformableNode.TransformModifiedEvent,
+        )
+
+
+class ControlPointAdaptor(NodeAdaptor):
+    """Adapts a single control point in a markup node.
+    Observers are only invoked if the particular control point is modified, handled by
+    caching the positions of observed control points.
+    """
+
+    _cache: weakref.WeakKeyDictionary[ControlPoint, Tuple[float, float, float]]
+
+    def __init__(self):
+        super().__init__()
+
+        self._cache = weakref.WeakKeyDictionary()
+
+    def events(self):
+        return (
+            slicer.vtkMRMLMarkupsNode.PointAddedEvent,
+            slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
+            slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
+        )
+
+    def wrap(self, item: ControlPoint, method):
+        def wrapped(obj, event):
+            with slicer.util.NodeModify(obj):
+                actual = item.position
+                cached = self._cache.get(item, None)
+
+                if cached and np.allclose(cached, actual):
+                    return None
+
+                method(item, event)
+
+                actual = item.position
+                self._cache[item] = actual
+
+        return wrapped
+
+    def getVtkObject(self, item):
+        return item.node
+
+
 class MarkupConstraintsLogic(
     ScriptedLoadableModuleLogic,
     VTKObservationMixin,
 ):
     _registry = {}
 
+    _adaptors = {
+        vtk.vtkObject: NodeAdaptor(),
+        slicer.vtkMRMLTransformableNode: TransformableNodeAdaptor(),
+        ControlPoint: ControlPointAdaptor(),
+    }
+
     _constraints: Dict[ControlPoint, Tuple[str, ...]]
-    _dependencies: weakref.WeakKeyDictionary[
-        "slicer.vtkMRMLMarkupsNode", Dict[str, List[ControlPoint]]
-    ]
-    _position_cache: weakref.WeakKeyDictionary[
-        "slicer.vtkMRMLMarkupsNode", Dict[str, Tuple[float, float, float]]
-    ]
+    _dependencies: weakref.WeakKeyDictionary[ControlPoint, List[ControlPoint]]
 
     def __init__(self):
         ScriptedLoadableModuleLogic.__init__(self)
@@ -102,92 +192,54 @@ class MarkupConstraintsLogic(
         # used to track which points are constrained, and how
 
         self._dependencies = weakref.WeakKeyDictionary()
-        # {arg.node: {arg.id: [*targets]}}
+        # {arg: [*targets]}}
         # used to determine the points to update after a given point is moved
 
-        self._position_cache = weakref.WeakKeyDictionary()
-        # {arg.node: {arg.id: position}}
-        # used to determine whether a point has moved or not, to prevent extra updates
+    @classmethod
+    def adaptor(cls, item) -> NodeAdaptor:
+        typ = type(item)
+        bases = typ.__mro__
+        for base in bases:
+            if base in cls._adaptors:
+                return cls._adaptors[base]
+        raise ValueError(f"Missing adaptor for {typ!r} with bases {bases}")
 
-    def _onNodeModify(self, node, event):
-        # todo adaptor should subscribe event and handle caching via weakref if needed
-
-        position_cache = self._position_cache.setdefault(node, {})
-
-        with slicer.util.NodeModify(node):
-            for arg_id, targets in self._dependencies[node].items():
-                current = ControlPoint(node, arg_id).position
-                cached = position_cache.get(arg_id, None)
-                if cached and np.allclose(cached, current):
-                    continue
-
-                position_cache[arg_id] = current
-
-                for target in targets:
-                    kind, *args = self._constraints[target]
-                    func = self._registry[kind]
-                    func(target, *args)
+    def _onModify(self, item, event):
+        for target in self._dependencies[item]:
+            kind, *args = self._constraints[target]
+            func = self._registry[kind]
+            func(target, *args)
 
     def setConstraint(
         self,
         target: ControlPoint,
         kind: str,
         *args: Union[ControlPoint, Any],
-    ):
-        _EVENTS = ()
+    ):  # todo extra dependencies to trigger recompute but otherwise ignored
         cons: Constraint = self._registry[kind]
 
         self._constraints[target] = (kind, *args)
 
-        for value in args:
-            # check the value is a control point; if so, it should be observed and added
-            # to the internal datastructures. if not it will pass through to the
-            # constraint as a constant. to change the constant, invoke setConstraint
-            # with a different value
-            if isinstance(value, ControlPoint):
-                # todo adaptor. observe events and serialize to node
+        for arg in args:
+            deps = self._dependencies.setdefault(arg, [])
+            deps.append(target)
 
-                if value.node not in self._dependencies:
-                    for event in (
-                        slicer.vtkMRMLMarkupsNode.PointAddedEvent,
-                        slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-                        slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
-                    ):
-                        self.addObserver(
-                            value.node,
-                            event,
-                            self._onNodeModify,
-                            priority=100.0,
-                        )
-
-                node_dependencies = self._dependencies.setdefault(value.node, {})
-                dependent_nodes = node_dependencies.setdefault(value.id, [])
-                dependent_nodes.append(target)
+            adaptor = self.adaptor(arg)  # use mro to find most-specified adaptor
+            adaptor.addObservers(arg, self._onModify, priority=100.0)
 
         cons(target, *args)
 
     def delConstraint(self, target: ControlPoint):
         kind, *args = self._constraints.pop(target)
-        cons: Constraint = self._registry[kind]
 
-        for value in args:
-            if isinstance(value, ControlPoint):
-                # todo adaptor. remove observers and remove parameters from nodes
+        for arg in args:
+            self._dependencies[arg].remove(target)
 
-                self._dependencies[value.node][value.id].remove(target)
+            if not self._dependencies[arg]:
+                del self._dependencies[arg]
 
-                if not self._dependencies[value.node][value.id]:
-                    del self._dependencies[value.node][value.id]
-
-                if not self._dependencies[value.node]:
-                    del self._dependencies[value.node]
-
-                    for event in (
-                        slicer.vtkMRMLMarkupsNode.PointAddedEvent,
-                        slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
-                        slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
-                    ):
-                        self.removeObserver(value.node, event, self._onNodeModify)
+            adaptor = self.adaptor(arg)
+            adaptor.delObservers(arg)
 
     @classmethod
     def registerConstraint(cls, key, func):
@@ -271,6 +323,27 @@ def distance(
     vtk.vtkMath.Add(pos, root, pos)
 
     target.position = pos
+
+
+@constraint
+def nearest(
+    target: ControlPoint,
+    source: ControlPoint,
+    model: slicer.vtkMRMLNode,
+):
+    locator = vtk.vtkPointLocator()
+    locator.SetDataSet(model.GetPolyData())
+    locator.AutomaticOn()
+
+    points = slicer.util.arrayFromModelPoints(model)
+
+    temp = vtk.vtkVector3d()
+
+    model.TransformPointFromWorld(source.position, temp)
+    index = locator.FindClosestPoint(temp)
+
+    model.TransformPointToWorld(points[index], temp)
+    target.position = temp
 
 
 class MarkupConstraintsTest(
