@@ -78,3 +78,14 @@ just positions of markups, although position constraints are the most natural (a
 motivating) application. 
 
 User documentation should be created once the API is more solidified.
+
+## Why not include in Slicer Core?
+
+I've chosen to build the module as a Python extension for ease of development and so the
+module is not locked to the Slicer release schedule. In the future, when these features
+are more mature, it may be sensible to move this functionality into Slicer core for ease
+of use.
+
+If it is added to Slicer core, I feel the constraints system should be restructured using
+MRML nodes so they are truly part of the scene, rather than using node parameters and
+references as is done now.
