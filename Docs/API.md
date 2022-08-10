@@ -13,8 +13,12 @@ node = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsFiducialNode')
 A = ControlPoint.new(node, [-1, 0, 0])
 B = ControlPoint.new(node, [+1, 0, 0])
 C = ControlPoint.new(node)
+D = ControlPoint.new(node)
 
 logic.setConstraint(C, 'midpoint', A, B)  # lock C to the midpoint of A and B.
+
+logic.setConstraint(C, 'midpoint', A, B, extras=[C, D])  # recompute if C or D are updated.
+# Prevents moving C away from the midpoint and indicates an external dependency on D. Extras are not passed to the constraint function.
 
 axis = slicer.mrmlScene.AddNewNodeByClass('vtkMRMLMarkupsLineNode')
 X = ControlPoint.new(axis, [-1, -1, 0])
