@@ -203,7 +203,7 @@ class MarkupConstraintsLogic(
         for base in bases:
             if base in cls._adaptors:
                 return cls._adaptors[base]
-        raise ValueError(f"Missing adaptor for {typ!r} with bases {bases}")
+        raise TypeError(f"Missing adaptor for {typ!r} with bases {bases}")
 
     def _onModify(self, item, event):
         for target in self._dependencies[item]:
@@ -226,25 +226,33 @@ class MarkupConstraintsLogic(
         cons: Constraint = self._registry[kind]
 
         for arg in set(args + extras):
+            try:
+                adaptor = self.adaptor(arg)  # use mro to find most-specified adaptor
+            except TypeError:
+                continue
+
+            adaptor.addObservers(arg, self._onModify, priority=100.0)
+
             deps = self._dependencies.setdefault(arg, [])
             deps.append(target)
-
-            adaptor = self.adaptor(arg)  # use mro to find most-specified adaptor
-            adaptor.addObservers(arg, self._onModify, priority=100.0)
 
         cons(target, *args)
 
     def delConstraint(self, target: ControlPoint):
-        kind, *args = self._constraints.pop(target)
+        kind, args, extras = self._constraints.pop(target)
 
-        for arg in args:
+        for arg in set(args + extras):
+            try:
+                adaptor = self.adaptor(arg)
+            except TypeError:
+                continue
+
+            adaptor.delObservers(arg)
+
             self._dependencies[arg].remove(target)
 
             if not self._dependencies[arg]:
                 del self._dependencies[arg]
-
-            adaptor = self.adaptor(arg)
-            adaptor.delObservers(arg)
 
     @classmethod
     def registerConstraint(cls, key, func):
