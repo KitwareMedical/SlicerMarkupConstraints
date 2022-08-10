@@ -91,3 +91,19 @@ S: ControlPoint = ...
 F: float = ...
 logic.setConstraint(T, 'my_constraint', S, F)
 ```
+
+## Custom Adaptors
+
+Allow using other types as dependencies by extending `NodeAdaptor`. See `ControlPointAdaptor` for an example.
+
+### `NodeAdaptor.wrap(item, method)`
+
+Returns a VTK observer `observer(node, event)` which calls `method(item, event)` only if the wrapped item was updated.
+
+### `NodeAdaptor.events()`
+
+Returns a list of VTK events to be observed.
+
+### `NodeAdaptor.getVtkObject(item)`
+
+Gets the associated VTK object for a wrapped item. Observers are added to this object.
