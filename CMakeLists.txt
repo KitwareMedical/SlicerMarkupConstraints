@@ -4,7 +4,7 @@ project(SlicerMarkupConstraints)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "http://github.com/KitwareMedical/SlicerMarkupConstraints")
+set(EXTENSION_HOMEPAGE "https://github.com/KitwareMedical/SlicerMarkupConstraints")
 set(EXTENSION_CATEGORY "Developer Tools")
 set(EXTENSION_CONTRIBUTORS "David Allemang (Kitware)")
 set(EXTENSION_DESCRIPTION "This extension contains one module of the same name. It allows Slicer extension developers to constrain
