@@ -4,15 +4,15 @@ project(SlicerMarkupConstraints)
 
 #-----------------------------------------------------------------------------
 # Extension meta-information
-set(EXTENSION_HOMEPAGE "https://github.com/KitwareMedical/SlicerMarkupConstraints")
+set(EXTENSION_HOMEPAGE "https://github.com/KitwareMedical/SlicerMarkupConstraints/tree/5.0")
 set(EXTENSION_CATEGORY "Developer Tools")
 set(EXTENSION_CONTRIBUTORS "David Allemang (Kitware)")
 set(EXTENSION_DESCRIPTION "This module is a development tool which allows extension developers to constrain the placement of markup control points based on other vtk objects. The extension was created during Slicer Project Week 37 for the Q3DCExtension project.")
 set(EXTENSION_ICONURL
-    "https://raw.githubusercontent.com/KitwareMedical/SlicerMarkupConstraints/main/SlicerMarkupConstraints.png")
+    "https://raw.githubusercontent.com/KitwareMedical/SlicerMarkupConstraints/5.0/SlicerMarkupConstraints.png")
 set(EXTENSION_SCREENSHOTURLS
-    "https://raw.githubusercontent.com/KitwareMedical/SlicerMarkupConstraints/main/Docs/static-project-angle.png"
-    "https://raw.githubusercontent.com/KitwareMedical/SlicerMarkupConstraints/main/Docs/project-anchor.gif")
+    "https://raw.githubusercontent.com/KitwareMedical/SlicerMarkupConstraints/5.0/Docs/static-project-angle.png"
+    "https://raw.githubusercontent.com/KitwareMedical/SlicerMarkupConstraints/5.0/Docs/project-anchor.gif")
 set(EXTENSION_ENABLED 1)
 
 #-----------------------------------------------------------------------------
