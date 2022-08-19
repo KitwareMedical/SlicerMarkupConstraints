@@ -267,6 +267,9 @@ class MarkupConstraintsLogic(
         cons(target, *args)
 
     def delConstraint(self, target: ControlPoint):
+        if target not in self._constraints:
+            return
+
         kind, args, extras = self._constraints.pop(target)
 
         for arg in set(args + extras):
