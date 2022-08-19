@@ -60,6 +60,26 @@ class ControlPoint:
     def position(self, pos):
         self.node.SetNthControlPointPosition(self.idx, pos)
 
+    @property
+    def label(self):
+        return self.node.GetNthControlPointLabel(self.idx)
+
+    @label.setter
+    def label(self, value):
+        self.node.SetNthControlPointLabel(self.idx, value)
+
+    @property
+    def description(self):
+        return self.node.GetNthControlPointDescription(self.idx)
+
+    @description.setter
+    def description(self, value):
+        self.node.SetNthControlPointDescription(self.idx, value)
+
+    @property
+    def exists(self):
+        return self.idx >= 0
+
     def setLocked(self, locked):
         self.node.SetNthControlPointLocked(self.idx, locked)
 
@@ -74,6 +94,8 @@ class ControlPoint:
         id_ = node.GetNthControlPointID(idx)
         return cls(node, id_)
 
+    def __bool__(self):
+        return self.exists
 
 # Todo expand API via abstract class.
 Constraint: Callable[[ControlPoint, ...], None]
