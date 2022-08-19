@@ -77,6 +77,14 @@ class ControlPoint:
         self.node.SetNthControlPointDescription(self.idx, value)
 
     @property
+    def visibility(self):
+        return self.node.GetNthControlPointVisibility(self.idx)
+
+    @visibility.setter
+    def visibility(self, value):
+        self.node.SetNthControlPointVisibility(self.idx, value)
+
+    @property
     def exists(self):
         return self.idx >= 0
 
