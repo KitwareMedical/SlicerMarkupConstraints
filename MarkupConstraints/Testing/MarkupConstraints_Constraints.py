@@ -13,7 +13,7 @@ class TestConstraints(unittest.TestCase):
         A = ControlPoint.new(node, (-1.0, 0.0, +1))
         T = ControlPoint.new(node)
 
-        logic.setConstraint(T, "lock", T, A)
+        logic.setConstraint(T, "lock", A, extras=[T])
         self.assertEqual(T.position, (-1.0, 0.0, +1.0), "Apply on set")
 
         A.position = (-1.0, 0.0, -1.0)

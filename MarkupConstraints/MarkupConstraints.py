@@ -315,7 +315,7 @@ def midpoint(target: ControlPoint, *sources: ControlPoint):
 
 
 @constraint
-def lock(target: ControlPoint, source: ControlPoint, dest: ControlPoint):
+def lock(target: ControlPoint, dest: ControlPoint):
     """Move target to the destination position. Source is ignored but required for
     interactive locking.
     """
