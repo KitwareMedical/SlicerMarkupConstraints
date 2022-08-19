@@ -157,7 +157,7 @@ class ControlPointAdaptor(NodeAdaptor):
     caching the positions of observed control points.
     """
 
-    _cache: weakref.WeakKeyDictionary[ControlPoint, Tuple[float, float, float]]
+    _cache: weakref.WeakKeyDictionary[ControlPoint, Tuple[str, Tuple[float, float, float]]]
 
     def __init__(self):
         super().__init__()
@@ -174,16 +174,14 @@ class ControlPointAdaptor(NodeAdaptor):
     def wrap(self, item: ControlPoint, method):
         def wrapped(obj, event):
             with slicer.util.NodeModify(obj):
-                actual = item.position
-                cached = self._cache.get(item, None)
+                label, position = self._cache.get(item, (None, None))
 
-                if cached and np.allclose(cached, actual):
+                if item in self._cache and label == item.label and np.allclose(position, item.position):
                     return None
 
                 method(item, event)
 
-                actual = item.position
-                self._cache[item] = actual
+                self._cache[item] = item.label, item.position
 
         return wrapped
 
