@@ -58,7 +58,11 @@ class ControlPoint:
 
     @position.setter
     def position(self, pos):
-        self.node.SetNthControlPointPosition(self.idx, pos)
+        if pos is None:
+            self.node.UnsetNthControlPointPosition(self.idx)
+        else:
+            mode = self.node.GetNthControlPointPositionStatus(self.idx)
+            self.node.SetNthControlPointPosition(self.idx, pos, mode)
 
     @property
     def label(self):
@@ -92,15 +96,12 @@ class ControlPoint:
         self.node.SetNthControlPointLocked(self.idx, locked)
 
     @classmethod
-    def new(cls, node: "slicer.vtkMRMLMarkupsNode", pos=None):
-        if pos is None:
-            pos = vtk.vtkVector3d()
-        elif not isinstance(pos, vtk.vtkVector3d):
-            pos = vtk.vtkVector3d(pos)
-
-        idx = node.AddControlPoint(pos or vtk.vtkVector3d())
+    def new(cls, node: "slicer.vtkMRMLMarkupsNode", pos=(0, 0, 0)):
+        idx = node.AddControlPoint(vtk.vtkVector3d())
         id_ = node.GetNthControlPointID(idx)
-        return cls(node, id_)
+        cp = cls(node, id_)
+        cp.position = pos
+        return cp
 
     def __bool__(self):
         return self.exists
