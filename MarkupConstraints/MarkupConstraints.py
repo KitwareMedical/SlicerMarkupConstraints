@@ -266,6 +266,8 @@ class MarkupConstraintsLogic(
         *args: Union[ControlPoint, Any],
         extras: typing.Iterable[Union[ControlPoint, Any]] = (),
     ):
+        self.delConstraint(target)
+
         args = tuple(args)
         extras = tuple(extras)
 
@@ -286,8 +288,11 @@ class MarkupConstraintsLogic(
 
         cons(target, *args)
 
+    def hasConstraint(self, target: ControlPoint):
+        return target in self._constraints
+
     def delConstraint(self, target: ControlPoint):
-        if target not in self._constraints:
+        if not self.hasConstraint(target):
             return
 
         kind, args, extras = self._constraints.pop(target)
