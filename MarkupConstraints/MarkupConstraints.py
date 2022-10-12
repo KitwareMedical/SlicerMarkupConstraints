@@ -126,7 +126,11 @@ class NodeAdaptor:
         return item
 
     def events(self):
-        return (vtk.vtkCommand.ModifiedEvent,)
+        return vtk.vtkCommand.ModifiedEvent,
+
+    def is_valid(self, item):  # todo generic type hints
+        # used to detect ex. a deleted control point
+        return True
 
     def addObservers(self, item, method, priority=0.0):
         events = self.events()
@@ -154,6 +158,9 @@ class TransformableNodeAdaptor(NodeAdaptor):
     """Adaptor for vtkMRMLTransformableNode; also observes TransformModifiedEvent."""
 
     def events(self):
+        # todo generator
+        #  yield from super().events()
+        #  yield slicer.vtkMRMLTransformableNode.TransformModifiedEvent
         return super().events() + (
             slicer.vtkMRMLTransformableNode.TransformModifiedEvent,
         )
@@ -196,6 +203,9 @@ class ControlPointAdaptor(NodeAdaptor):
     def getVtkObject(self, item):
         return item.node
 
+    def is_valid(self, item: ControlPoint):
+        return item.exists
+
 
 class MarkupConstraintsLogic(
     ScriptedLoadableModuleLogic,
@@ -234,10 +244,19 @@ class MarkupConstraintsLogic(
         raise TypeError(f"Missing adaptor for {typ!r} with bases {bases}")
 
     def _onModify(self, item, event):
+        to_remove = []
+
         for target in self._dependencies[item]:
-            kind, args, extras = self._constraints[target]
-            func = self._registry[kind]
-            func(target, *args)
+            adaptor = self.adaptor(target)
+            if not adaptor.is_valid(target):
+                to_remove.append(target)
+            else:
+                kind, args, extras = self._constraints[target]
+                func = self._registry[kind]
+                func(target, *args)
+
+        for target in to_remove:
+            self.delConstraint(target)
 
     def setConstraint(
         self,
