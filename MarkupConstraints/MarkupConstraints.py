@@ -54,7 +54,7 @@ class ControlPoint:
 
     @property
     def position(self) -> Tuple[float, float, float]:
-        return self.node.GetNthControlPointPosition(self.idx)
+        return self.node.GetNthControlPointPositionWorld(self.idx)
 
     @position.setter
     def position(self, pos):
@@ -62,7 +62,7 @@ class ControlPoint:
             self.node.UnsetNthControlPointPosition(self.idx)
         else:
             mode = self.node.GetNthControlPointPositionStatus(self.idx)
-            self.node.SetNthControlPointPosition(self.idx, pos, mode)
+            self.node.SetNthControlPointPositionWorld(self.idx, pos, mode)
 
     @property
     def label(self):
