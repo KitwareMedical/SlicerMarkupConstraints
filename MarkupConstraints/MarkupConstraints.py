@@ -167,7 +167,7 @@ class TransformableNodeAdaptor(NodeAdaptor):
         )
 
 
-class ControlPointAdaptor(NodeAdaptor):
+class ControlPointAdaptor(TransformableNodeAdaptor, NodeAdaptor):
     """Adapts a single control point in a markup node.
     Observers are only invoked if the particular control point is modified, handled by
     caching the positions of observed control points.
@@ -181,7 +181,7 @@ class ControlPointAdaptor(NodeAdaptor):
         self._cache = weakref.WeakKeyDictionary()
 
     def events(self):
-        return (
+        return super().events() + (
             slicer.vtkMRMLMarkupsNode.PointAddedEvent,
             slicer.vtkMRMLMarkupsNode.PointModifiedEvent,
             slicer.vtkMRMLMarkupsNode.PointRemovedEvent,
